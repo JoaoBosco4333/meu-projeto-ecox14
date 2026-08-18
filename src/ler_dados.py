@@ -1,6 +1,6 @@
 import pandas as pd
 
-CAMINHO = "./dados/bronze/Spotify.csv"
+CAMINHO = "./meu-projeto/dados/bronze/Spotify.csv"
 
 df = pd.read_csv(CAMINHO)
 
