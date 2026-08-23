@@ -1,3 +1,5 @@
 pandas
 kagglehub
 requests
+os
+shutil
