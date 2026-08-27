@@ -1,5 +1,6 @@
 pandas
 kagglehub
 requests
-os
-shutil
+fg-data-profiling
+setuptools<82 
+
