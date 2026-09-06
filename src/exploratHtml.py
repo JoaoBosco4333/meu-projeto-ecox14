@@ -23,26 +23,10 @@ def gerar(fonte):
     perfil.to_file(saida)
     return saida
 
-def alertas(fonte):
-    df = carregar(fonte)
-    perfil = ProfileReport(df, title=fonte.upper(), minimal=True)
-    descricao = perfil.get_description()
-
-    RELATORIOS.mkdir(exist_ok=True)  # <- linha que faltava
-    saida = RELATORIOS / f"{fonte}_alertas.txt"
-    with open(saida, "w", encoding="utf-8") as f:
-        for alerta in descricao.alerts:
-            tipo = getattr(alerta, "alert_type_name", None) or getattr(alerta, "alert_type", "")
-            coluna = getattr(alerta, "column_name", "") or "(dataset)"
-            f.write(f"{tipo} | {coluna} | {alerta}\n")
-
-    print("alertas salvos em:", saida)
-    return saida
-
 def main(fonte):
     print("perfilando:", fonte)
     print(gerar(fonte))
 
 if __name__ == "__main__":
     fonte = sys.argv[1] if len(sys.argv) > 1 else "sim"
-    alertas(fonte)
+    main(fonte)
