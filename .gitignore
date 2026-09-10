@@ -8,6 +8,7 @@
 # O codigo do projeto reconstroi estes arquivos.
 dados/bronze/*.csv
 dados/prata/*
+!dados/prata/proveniencia.jsonl
 dados/ouro/*
 .venv/
 relatorios/
