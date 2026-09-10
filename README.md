@@ -1,8 +1,8 @@
 ## Fontes de dados
 | Fonte | Formato | Acesso | Extraido | Link |
 |---|---|---|---|---|
-| SIM (Mortalidade) | CSV | aberto (DATASUS) | 29/08/2026 | https://svs.aids.gov.br/dantps/centrais-de-conteudos/dados-abertos/sim/ |
-| SINASC (Nascidos Vivos) | CSV | aberto (DATASUS) | 29/08/2026 | https://svs.aids.gov.br/dantps/centrais-de-conteudos/dados-abertos/sinasc/ |
+| SIM (Mortalidade) | CSV | aberto (DATASUS) | 29/08/2026 | https://dadosabertos.saude.gov.br/dataset/sim |
+| SINASC (Nascidos Vivos) | CSV | aberto (DATASUS) | 29/08/2026 | https://dadosabertos.saude.gov.br/dataset/sistema-de-informacao-sobre-nascidos-vivos-sinasc |
 
 
 ## Defeitos conhecidos das fontes
