@@ -9,4 +9,4 @@ print(df.shape)
 #print(df.columns)
 
 #for coluna in df.columns:
-#    print(f"{coluna}: {df[coluna].dtype}")
+#print(f"{coluna}: {df[coluna].dtype}")

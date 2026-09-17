@@ -3,9 +3,20 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 
+import limpeza
+
 BRONZE = Path("dados/bronze")
 PRATA = Path("dados/prata")
 PADRAO = "SINASC_*.csv"
+
+ORDEM_ESCOLARIDADE = [0, 1, 2, 3, 4, 5]  # 9 = ignorado, fica fora de proposito
+
+CORTES_PESO = [0, 2500, 4000, float("inf")]
+ROTULOS_PESO = ["baixo peso", "peso normal", "alto peso"]
+
+
+def criar_faixa_peso(df):
+    return limpeza.faixa_por_corte(df, "PESO", CORTES_PESO, ROTULOS_PESO)
 
 
 def carregar():
@@ -16,13 +27,6 @@ def carregar():
     df = pd.read_csv(caminho, sep=";", encoding="latin-1", low_memory=False)
     print("lido:", caminho.name, df.shape)
     return df, caminho
-
-
-def tirar_espacos(df):
-    df.columns = df.columns.str.strip()
-    for coluna in df.select_dtypes(include="object"):
-        df[coluna] = df[coluna].str.strip()
-    return df
 
 
 def conferir_chave(df, chave="contador"):
@@ -50,6 +54,11 @@ def converter_tipos(df):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def tipar_escolaridade(df):
+    df["ESCMAE2010"] = pd.to_numeric(df["ESCMAE2010"], errors="coerce").astype("Int64")
+    return limpeza.tipar_categoria_ordenada(df, "ESCMAE2010", ORDEM_ESCOLARIDADE)
 
 
 def remover_erros_apgar(df):
@@ -112,19 +121,22 @@ def registrar(origem, destino, antes, depois, decisoes):
 def main():
     df, origem = carregar()
     antes = len(df)
-    df = tirar_espacos(df)
+    df = limpeza.tirar_espacos(df)
     df = conferir_chave(df)
     df = converter_datas(df)
     df = converter_tipos(df)
+    df = tipar_escolaridade(df)
     df = remover_erros_apgar(df)
     df = remover_erros_peso(df)
     df = marcar_extremos(df, "PESO")
     df = marcar_zscore(df, "PESO")
+    df = criar_faixa_peso(df)
     destino = salvar(df)
     registrar(origem, destino, antes, len(df), [
         "linhas identicas verificadas por contador",
         "DTNASC, DTULTMENST, DTDECLARAC convertidas para data",
         "PESO, APGAR1, APGAR5, IDADEMAE, QTDFILVIVO, QTDFILMORT, SEMAGESTAC convertidas para numero",
+        "ESCMAE2010 tipada como categoria ordenada (0-5); 9=ignorado vira ausente",
         "APGAR1/APGAR5 fora de 0-10 removidos (erro comprovado, faixa fixa da escala)",
         "PESO fora de 200-7000g removido (erro comprovado, limite biologico)",
         "PESO marcado com extremos via IQR e z-score",

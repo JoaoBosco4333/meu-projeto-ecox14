@@ -3,9 +3,13 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 
+import limpeza
+
 BRONZE = Path("dados/bronze")
 PRATA = Path("dados/prata")
 PADRAO = "SIM_*.csv"
+
+ORDEM_ESCOLARIDADE = [0, 1, 2, 3, 4, 5]  # 9 = ignorado, fica fora de proposito
 
 
 def carregar():
@@ -16,13 +20,6 @@ def carregar():
     df = pd.read_csv(caminho, sep=";", encoding="latin-1", low_memory=False)
     print("lido:", caminho.name, df.shape)
     return df, caminho
-
-
-def tirar_espacos(df):
-    df.columns = df.columns.str.strip()
-    for coluna in df.select_dtypes(include="object"):
-        df[coluna] = df[coluna].str.strip()
-    return df
 
 
 def conferir_chave(df, chave="contador"):
@@ -44,6 +41,11 @@ def resolver_escolaridade(df):
         print("ESC removida; mantida ESC2010 (padrao mais recente)")
         df = df.drop(columns=["ESC"])
     return df
+
+
+def tipar_escolaridade(df):
+    df["ESC2010"] = pd.to_numeric(df["ESC2010"], errors="coerce").astype("Int64")
+    return limpeza.tipar_categoria_ordenada(df, "ESC2010", ORDEM_ESCOLARIDADE)
 
 
 def decodificar_idade(df):
@@ -128,10 +130,11 @@ def registrar(origem, destino, antes, depois, decisoes):
 def main():
     df, origem = carregar()
     antes = len(df)
-    df = tirar_espacos(df)
+    df = limpeza.tirar_espacos(df)
     df = conferir_chave(df)
     df = remover_colunas_mortas(df)
     df = resolver_escolaridade(df)
+    df = tipar_escolaridade(df)
     df = decodificar_idade(df)
     df = converter_datas(df)
     df = marcar_extremos(df, "idade_anos")
@@ -142,6 +145,7 @@ def main():
         "linhas identicas verificadas por contador",
         "CB_PRE removida (100% vazia)",
         "ESC removida, mantida ESC2010",
+        "ESC2010 tipada como categoria ordenada (0-5); 9=ignorado vira ausente",
         "IDADE decodificada em idade_anos (padrao DATASUS unidade+quantidade)",
         "DTOBITO e DTNASC convertidas para data",
         "idade_anos fora de 0-130 removida (erro comprovado)",

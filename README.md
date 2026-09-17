@@ -75,3 +75,41 @@
   e sinalizados, nao removidos.
 - Chave adotada: 'contador' (sequencial da extracao). Mesma limitacao
   do SIM: duplicidade de entidade nao e verificavel com confianca.
+
+## Atributos derivados
+
+### PESO_faixa (SINASC)
+Faixa de peso ao nascer (baixo peso / peso normal / alto peso), a partir
+de cortes clinicos fixos (2500g e 4000g), nao por quartil. Serve para
+categorizar recem-nascidos em grupos de risco reconhecidos na literatura
+de saude publica. Ausente quando PESO ja era ausente na fonte (219 casos).
+
+### regiao (populacao IBGE)
+Macrorregiao do Brasil, derivada do primeiro digito do codigo do
+municipio (IBGE). Serve como chave de agregacao para responder a
+pergunta norteadora por regiao.
+
+### taxa_mortalidade_infantil (Ouro, combinacao de fontes)
+Obitos com idade_anos == 0 (SIM) dividido por nascidos vivos (SINASC),
+por 1000 nascidos vivos, agregado por regiao. Responde diretamente a
+primeira metade da pergunta norteadora. Calculada somando numerador e
+denominador de todos os municipios da regiao antes de dividir (nao e
+media das taxas municipais).
+
+### taxa_natalidade (Ouro, combinacao de fontes)
+Nascidos vivos (SINASC) dividido por populacao residente estimada
+(IBGE), por 1000 habitantes, agregado por regiao. Responde a segunda
+metade da pergunta norteadora.
+
+## Resultado (2024)
+Norte e Nordeste apresentam as maiores taxas de mortalidade infantil
+(15,68 e 13,55 por mil) e tambem as maiores taxas de natalidade (14,23
+e 11,68 por mil), enquanto Sul e Sudeste apresentam os menores valores
+em ambos os indicadores. A diferenca entre a regiao com maior e menor
+mortalidade infantil (Norte vs Sul) e de aproximadamente 50%.
+
+## Limitacoes
+17 registros (12 no SINASC, 5 no SIM) usam codigo de municipio "ignorado"
+(UF + 0000, convencao do DATASUS) e ficam fora da agregacao regional por
+nao existirem na base de populacao do IBGE - volume irrelevante frente
+ao total de ~2,4 milhoes de registros.
