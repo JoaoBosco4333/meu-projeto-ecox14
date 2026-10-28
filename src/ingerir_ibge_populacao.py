@@ -28,7 +28,7 @@ URL = (
 )
 
 BRONZE = Path("dados/bronze/ibge/populacao_municipios")
-MUNICIPIOS_ESPERADOS = 5570  # numero oficial de municipios brasileiros
+MUNICIPIOS_ESPERADOS = 5571  # numero oficial de municipios brasileiros
 
 
 def buscar():
