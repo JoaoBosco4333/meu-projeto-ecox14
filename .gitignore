@@ -16,6 +16,9 @@ relatorios/
 # Excecao: mantem as pastas visiveis no GitHub, mesmo vazias.
 !dados/**/.gitkeep
 
+# Log do pipeline (gerado a cada execucao)
+pipeline.log
+
 # Arquivos gerados pelo Python
 __pycache__/
 *.pyc
