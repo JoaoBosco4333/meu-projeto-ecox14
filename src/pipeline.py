@@ -1,11 +1,12 @@
-"""Pipeline completo: ingestao -> transformacao -> enriquecimento.
+"""Pipeline completo: ingestao -> transformacao -> enriquecimento -> carga.
 
 Como executar, a partir de qualquer pasta:
     python src/pipeline.py                  # roda tudo
     python src/pipeline.py enriquecimento   # retoma a partir de uma etapa
+    python src/pipeline.py carga            # so a carga (e o que vier depois dela)
 
-Etapas ainda nao implementadas (carga, modelagem) aparecem na lista com
-None e sao apenas registradas no log, sem quebrar a execucao.
+Etapas ainda nao implementadas (modelagem) aparecem na lista com None e
+sao apenas registradas no log, sem quebrar a execucao.
 
 Regra de importacao: o pipeline importa as etapas; nenhuma etapa importa
 o pipeline.
@@ -50,11 +51,18 @@ def transformar_todas():
     transformar_sinasc.main()
 
 
+def etapa_carga():
+    # O import fica dentro da funcao: se o duckdb nao estiver instalado, o erro
+    # aparece so quando a carga roda; as etapas anteriores nao dependem dele.
+    import carga
+    carga.main()
+
+
 ETAPAS = [
     ("ingestao", ingerir_todas),
     ("transformacao", transformar_todas),
     ("enriquecimento", enriquecer.main),
-    ("carga", None),
+    ("carga", etapa_carga),
     ("modelagem", None),
 ]
 

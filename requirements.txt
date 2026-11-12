@@ -3,4 +3,5 @@ requests
 fg-data-profiling
 setuptools<82 
 pyarrow
+duckdb
 
