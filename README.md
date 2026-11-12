@@ -159,6 +159,99 @@ Por região, numerador e denominador são somados no grão de município e só d
 divididos (não é média das taxas municipais).
 
 
+## Modelo da camada Ouro
+
+A Ouro mora num banco DuckDB, que é um arquivo só: `dados/ouro/projeto.duckdb`. Dentro
+dele há dois esquemas: `prata` (os Parquets da Prata, como estão) e `ouro` (nasce da
+prata, dentro do banco, escrita em SQL). O modelo é um esquema estrela: uma fato no meio,
+com os números, e uma dimensão em volta, com as palavras pelas quais se agrupa e filtra.
+
+**Grão: uma linha de `fato_indicador_municipio` é um município em um ano.**
+
+Dessa frase decorre o resto:
+- a chave primária da fato é o par (`municipio_id`, `ano`), e não o município sozinho;
+- entre municípios do mesmo ano, `populacao`, `nascimentos` e `obitos_infantis` podem ser
+  somados. As taxas não: para uma região, somam-se numerador e denominador e só depois se
+  divide. `populacao` também não se soma entre anos (é um estoque, não um fluxo);
+- duplicata é o mesmo município no mesmo ano duas vezes, e nada além disso.
+
+| Tabela | Tipo | Uma linha é | Vem de |
+|---|---|---|---|
+| `ouro.dim_municipio` | dimensão | um município (5.571) | `prata.populacao` |
+| `ouro.fato_indicador_municipio` | fato | um município em um ano | `prata.municipio_enriquecido` (+ `ano` de `prata.populacao`) |
+| `ouro.vw_indicador_completo` | view | um município em um ano, com nome, UF e região | fato + dimensão |
+| `ouro.vw_indicador_regiao` | view | uma região em um ano | `vw_indicador_completo` |
+
+Como as tabelas se ligam: `fato_indicador_municipio.municipio_id` aponta para
+`dim_municipio.municipio_id` (muitos para um). `municipio_id` é o código de 6 dígitos, o
+mesmo `codigo_municipio_6` que liga o DATASUS ao IBGE; o código completo, de 7 dígitos,
+fica em `dim_municipio.codigo_ibge`.
+
+```
+dim_municipio                         fato_indicador_municipio
+  municipio_id  <-------------------   municipio_id
+  codigo_ibge                           ano
+  nome, uf, regiao                      populacao, nascimentos, obitos_infantis
+                                        taxa_natalidade, taxa_mortalidade_infantil
+```
+
+Decisões de modelagem:
+- A `municipio_enriquecido` (saída do enriquecimento) é a entrada da fato: ela já resolveu
+  quem tem município no cadastro, então esse trabalho não é refeito. A tabela achatada
+  deixa de ser mantida como arquivo e vira a view `vw_indicador_completo`, com o mesmo
+  resultado.
+- A UF vem embutida no nome da fonte ("Ariquemes - RO"); na dimensão ela vira a coluna `uf`
+  e o `nome` fica sem ela.
+- Não há `dim_tempo`: o projeto só usa o ano, que fica na fato. Como `ano` faz parte do
+  grão, acrescentar outros anos não muda as tabelas, só acrescenta linhas.
+- Região é atributo de `dim_municipio`; não há `dim_regiao`.
+- `vw_indicador_regiao` existe para que ninguém calcule a taxa regional como média das
+  taxas municipais: ela soma numerador e denominador e só então divide. É a consulta que
+  responde à pergunta norteadora.
+- `sim` e `sinasc` (sem o enriquecimento) não são carregados no banco: as versões
+  enriquecidas têm as mesmas linhas e as mesmas colunas, mais 4. Carregar as duas seria
+  guardar tudo duas vezes (o banco passaria de cerca de 330 MB para cerca de 630 MB).
+- Municípios com código ignorado (UF + 0000) não existem no cadastro e ficam fora da fato
+  (49 nascimentos e 6 óbitos infantis); continuam em `prata.sinasc_enriquecido` e
+  `prata.sim_enriquecido`.
+- Boa Esperança do Norte (MT) tem população ausente na fonte do IBGE: `populacao`,
+  `taxa_natalidade` e `taxa_mortalidade_infantil` ficam nulas na fato (nascimentos e óbitos
+  são 0). A soma da população da região ignora o nulo.
+
+A etapa `carga` confere o modelo antes de terminar e para o pipeline se algo não fecha:
+nenhum município repetido no mesmo ano; nenhuma linha da fato sem município na dimensão
+(fato órfão); nenhuma linha sem ano; a dimensão com 5.571 municípios, sem repetição e sem
+região ausente; a fato e a view com o mesmo número de linhas da `municipio_enriquecido`;
+e as contagens da fato batendo com os eventos da Prata (2.387.162 nascimentos e 30.014
+óbitos infantis com município).
+
+Consultas de exemplo (a segunda usa o join da estrela):
+
+```sql
+SELECT regiao, taxa_natalidade, taxa_mortalidade_infantil
+FROM ouro.vw_indicador_regiao
+WHERE ano = 2024
+ORDER BY taxa_mortalidade_infantil DESC;
+
+SELECT d.uf, SUM(f.nascimentos) AS nascimentos
+FROM ouro.fato_indicador_municipio f
+JOIN ouro.dim_municipio d USING (municipio_id)
+WHERE f.ano = 2024
+GROUP BY d.uf
+ORDER BY nascimentos DESC
+LIMIT 5;
+```
+
+Para rodar uma consulta a partir do Python (`read_only=True` evita travar o arquivo para
+quem for abri-lo depois):
+
+```python
+import duckdb
+con = duckdb.connect("dados/ouro/projeto.duckdb", read_only=True)
+print(con.execute("SELECT * FROM ouro.vw_indicador_regiao").df())
+```
+
+
 ## Prévia do resultado (2024)
 
 | Região | Natalidade (por 1.000 hab.) | Mortalidade infantil (por 1.000 nascidos vivos) |
@@ -177,6 +270,7 @@ divididos (não é média das taxas municipais).
   nascimentos por 1.000 habitantes.
 - São taxas brutas observadas. Nenhum teste estatístico foi aplicado, então a prévia
   ainda não responde se a diferença entre regiões é "significativa".
+- Estes mesmos valores saem do banco, de `ouro.vw_indicador_regiao`, calculados em SQL.
 
 
 ## Limitações
@@ -201,7 +295,7 @@ pip install -r requirements.txt
 python src/pipeline.py
 ```
 
-O pipeline roda as etapas em ordem (ingestão, transformação, enriquecimento) e grava o
+O pipeline roda as etapas em ordem (ingestão, transformação, enriquecimento, carga) e grava o
 registro da execução em `pipeline.log` (tela e arquivo ao mesmo tempo; o arquivo não vai
 para o GitHub). Se uma etapa falhar, o erro completo fica no log e o pipeline para.
 
@@ -212,8 +306,18 @@ python src/pipeline.py enriquecimento
 ```
 
 Etapas disponíveis: `ingestao`, `transformacao`, `enriquecimento`, `carga`, `modelagem`.
-`carga` e `modelagem` ainda não foram implementadas: aparecem no log como "ainda não
-implementada" e não interrompem a execução.
+`modelagem` ainda não foi implementada: aparece no log como "ainda não implementada" e não
+interrompe a execução.
+
+A etapa `carga` (`src/carga.py`) cria o banco `dados/ouro/projeto.duckdb`, carrega a Prata
+no esquema `prata` e constrói a Ouro no esquema `ouro` (ver "Modelo da camada Ouro"). Ela
+precisa do pacote `duckdb`, que está no `requirements.txt`. Rodar de novo é seguro: cada
+tabela é refeita com `CREATE OR REPLACE`, sem duplicar nada. A primeira execução gera um
+arquivo de cerca de 330 MB; ao rodar de novo, o DuckDB não devolve ao disco o espaço das
+tabelas substituídas, então o arquivo pode chegar a cerca de 650 MB e para de crescer aí.
+Para voltar ao tamanho mínimo, feche qualquer programa que esteja com o banco aberto, apague
+`dados/ouro/projeto.duckdb` e rode `python src/pipeline.py carga`. Como o Ouro é
+reconstruído a partir da prata, apagar o banco não perde nada.
 
 A prata é reconstruível: apagar `dados/prata/` e rodar `python src/pipeline.py
 transformacao` recria tudo a partir da bronze.
@@ -229,4 +333,6 @@ e falhava com "out of memory". Por isso:
   da chave, e as colunas do cadastro são acrescentadas à tabela de eventos.
 
 O resultado de todas essas mudanças foi conferido contra a versão anterior (mesmas
-colunas, tipos e valores). O pico de memória fica em torno de 2 a 3 GB por etapa.
+colunas, tipos e valores). O pico de memória fica em torno de 2 a 3 GB por etapa. A carga
+usa menos (cerca de 1,5 GB): o DuckDB lê o Parquet em fluxo, sem abrir a tabela inteira
+na memória do Python.
