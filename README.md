@@ -162,9 +162,10 @@ divididos (não é média das taxas municipais).
 ## Modelo da camada Ouro
 
 A Ouro mora num banco DuckDB, que é um arquivo só: `dados/ouro/projeto.duckdb`. Dentro
-dele há dois esquemas: `prata` (os Parquets da Prata, como estão) e `ouro` (nasce da
-prata, dentro do banco, escrita em SQL). O modelo é um esquema estrela: uma fato no meio,
-com os números, e uma dimensão em volta, com as palavras pelas quais se agrupa e filtra.
+dele há dois esquemas: `prata` (os Parquets da Prata, como estão; criado pela etapa
+`carga`) e `ouro` (nasce da prata, dentro do banco, construído pelo dbt na etapa
+`modelagem`). O modelo é um esquema estrela: uma fato no meio, com os números, e uma
+dimensão em volta, com as palavras pelas quais se agrupa e filtra.
 
 **Grão: uma linha de `fato_indicador_municipio` é um município em um ano.**
 
@@ -218,7 +219,8 @@ Decisões de modelagem:
   `taxa_natalidade` e `taxa_mortalidade_infantil` ficam nulas na fato (nascimentos e óbitos
   são 0). A soma da população da região ignora o nulo.
 
-A etapa `carga` confere o modelo antes de terminar e para o pipeline se algo não fecha:
+A etapa `modelagem` confere o modelo depois que o dbt termina e para o pipeline se algo
+não fecha:
 nenhum município repetido no mesmo ano; nenhuma linha da fato sem município na dimensão
 (fato órfão); nenhuma linha sem ano; a dimensão com 5.571 municípios, sem repetição e sem
 região ausente; a fato e a view com o mesmo número de linhas da `municipio_enriquecido`;
@@ -250,6 +252,58 @@ import duckdb
 con = duckdb.connect("dados/ouro/projeto.duckdb", read_only=True)
 print(con.execute("SELECT * FROM ouro.vw_indicador_regiao").df())
 ```
+
+
+## Construção da Ouro com dbt
+
+Desde a Aula 10, quem constrói a Ouro é o dbt (data build tool), e não o Python. Cada
+ferramenta fica com o que sabe fazer:
+- `src/carga.py` (Python) abre o banco e carrega os Parquets no esquema `prata`: ler
+  arquivo não é transformação, então continua em Python;
+- `ecox14/` (dbt) guarda um arquivo `.sql` por tabela da Ouro, só com o `select`. O dbt
+  coloca o `create` em volta, descobre a ordem de execução e entrega o SQL ao DuckDB, que
+  é quem executa. O dbt não processa nenhuma linha.
+
+```
+ecox14/
+  dbt_project.yml                    nome do projeto; padrão: todo modelo vira tabela
+  profiles.yml                       como conectar: ../dados/ouro/projeto.duckdb, esquema ouro
+  models/
+    sources.yml                      origens: tabelas do esquema prata que o dbt não constrói
+    dim_municipio.sql                tabela
+    fato_indicador_municipio.sql     tabela
+    vw_indicador_completo.sql        view
+    vw_indicador_regiao.sql          view
+```
+
+A ordem de execução não está escrita em lugar nenhum: sai das referências.
+`{{ source('prata', 'populacao') }}` aponta para uma tabela que o dbt não constrói;
+`{{ ref('fato_indicador_municipio') }}` aponta para outro modelo e cria a dependência. Daí o
+dbt deduz: primeiro a dimensão e a fato, depois `vw_indicador_completo`, por último
+`vw_indicador_regiao`. Trocar tabela por view (ou o contrário) é mudar uma palavra, no
+`{{ config(materialized='view') }}` do topo do arquivo.
+
+O `profiles.yml` fica dentro de `ecox14/` (o dbt procura primeiro na pasta de onde roda)
+porque o DuckDB não tem usuário nem senha: não há segredo ali, e quem clonar o repositório
+não precisa configurar nada em `C:\Users\...\.dbt`. O caminho do banco é relativo a
+`ecox14/`, que é de onde o dbt deve rodar.
+
+Comandos, de dentro de `ecox14/` e com o ambiente virtual ativado:
+
+```
+dbt debug                            # mostra qual profile esta lendo e testa a conexao
+dbt run                              # constroi tudo
+dbt run --select dim_municipio+      # so a dimensao e o que depende dela
+```
+
+O SQL que o dbt de fato envia ao banco fica legível em `ecox14/target/run/ecox14/models/`.
+Dois programas não podem ficar com o arquivo do banco abertos ao mesmo tempo: se aparecer
+"file is locked", feche a outra conexão (DBeaver, extensão do VS Code, outro terminal) e
+rode de novo.
+
+A migração não mudou o resultado: as quatro tabelas e views saíram com as mesmas linhas, as
+mesmas colunas e os mesmos tipos de quando eram construídas por `carga.construir_ouro` (que
+continua no arquivo, sem ser chamada, para comparação).
 
 
 ## Prévia do resultado (2024)
@@ -306,15 +360,18 @@ python src/pipeline.py enriquecimento
 ```
 
 Etapas disponíveis: `ingestao`, `transformacao`, `enriquecimento`, `carga`, `modelagem`.
-`modelagem` ainda não foi implementada: aparece no log como "ainda não implementada" e não
-interrompe a execução.
+Para reconstruir só a camada Ouro (sem recarregar a Prata), rode
+`python src/pipeline.py modelagem`.
 
-A etapa `carga` (`src/carga.py`) cria o banco `dados/ouro/projeto.duckdb`, carrega a Prata
-no esquema `prata` e constrói a Ouro no esquema `ouro` (ver "Modelo da camada Ouro"). Ela
-precisa do pacote `duckdb`, que está no `requirements.txt`. Rodar de novo é seguro: cada
-tabela é refeita com `CREATE OR REPLACE`, sem duplicar nada. A primeira execução gera um
-arquivo de cerca de 330 MB; ao rodar de novo, o DuckDB não devolve ao disco o espaço das
-tabelas substituídas, então o arquivo pode chegar a cerca de 650 MB e para de crescer aí.
+A etapa `carga` (`src/carga.py`) cria o banco `dados/ouro/projeto.duckdb` e carrega a Prata
+no esquema `prata`. A etapa `modelagem` roda o dbt (`ecox14/`), que constrói a Ouro no
+esquema `ouro` (ver "Construção da Ouro com dbt"), e depois confere o resultado. A saída do
+dbt também vai para o `pipeline.log`. Os pacotes `duckdb`, `dbt-core` e `dbt-duckdb` estão
+no `requirements.txt`. Rodar de novo é seguro: as tabelas da prata são refeitas com
+`CREATE OR REPLACE` e os modelos do dbt também, sem duplicar nada. A primeira execução da
+carga gera um arquivo de cerca de 330 MB; ao rodar a carga de novo, o DuckDB não devolve ao
+disco o espaço das tabelas substituídas, então o arquivo pode chegar a cerca de 650 MB e para
+de crescer aí (a modelagem não aumenta o arquivo).
 Para voltar ao tamanho mínimo, feche qualquer programa que esteja com o banco aberto, apague
 `dados/ouro/projeto.duckdb` e rode `python src/pipeline.py carga`. Como o Ouro é
 reconstruído a partir da prata, apagar o banco não perde nada.
