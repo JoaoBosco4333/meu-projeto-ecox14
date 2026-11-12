@@ -49,7 +49,7 @@ extração fica registrada em `proveniencia.jsonl`, na bronze e na prata.
 - 'ESC' removida, mantida 'ESC2010' (padrão mais recente do MEC para escolaridade) -
   resolve a redundância identificada na exploração.
 - 'ESC2010' tipada como categoria ordenada (0 = sem escolaridade até 5 = superior
-  completo). O código 9 (ignorado) fica fora da escala e vira ausente: XXXX registros
+  completo). O código 9 (ignorado) fica fora da escala e vira ausente: 139.266 registros
   com código 9 na fonte.
 - 'DTOBITO' e 'DTNASC' convertidas de texto (ddmmaaaa) para tipo data.
 - 'idade_anos' criada a partir da decodificação de 'IDADE' (campo composto: 1º dígito
@@ -73,7 +73,7 @@ extração fica registrada em `proveniencia.jsonl`, na bronze e na prata.
 - 'PESO', 'APGAR1', 'APGAR5', 'IDADEMAE', 'QTDFILVIVO', 'QTDFILMORT' e 'SEMAGESTAC'
   convertidas para número.
 - 'ESCMAE2010' tipada como categoria ordenada (0 = sem escolaridade até 5 = superior
-  completo). O código 9 (ignorado) fica fora da escala e vira ausente: YYYY registros
+  completo). O código 9 (ignorado) fica fora da escala e vira ausente: 5.740 registros
   com código 9 na fonte.
 - 'APGAR1' (1.962) e 'APGAR5' (21) fora da escala 0-10 removidos - erro comprovado,
   escala fechada por definição clínica.
@@ -198,12 +198,35 @@ SIM e SINASC (CSV de 2024) são baixados manualmente do portal e colocados em
 
 ```
 pip install -r requirements.txt
-python src/ingerir_ibge_populacao.py
-python src/transformar_sim.py
-python src/transformar_sinasc.py
-python src/transformar_populacao.py
-python src/enriquecer.py
+python src/pipeline.py
 ```
 
-A prata é reconstruível: apagar `dados/prata/` e rodar os scripts de novo recria tudo
-a partir da bronze.
+O pipeline roda as etapas em ordem (ingestão, transformação, enriquecimento) e grava o
+registro da execução em `pipeline.log` (tela e arquivo ao mesmo tempo; o arquivo não vai
+para o GitHub). Se uma etapa falhar, o erro completo fica no log e o pipeline para.
+
+Para retomar a partir de uma etapa, sem refazer as anteriores:
+
+```
+python src/pipeline.py enriquecimento
+```
+
+Etapas disponíveis: `ingestao`, `transformacao`, `enriquecimento`, `carga`, `modelagem`.
+`carga` e `modelagem` ainda não foram implementadas: aparecem no log como "ainda não
+implementada" e não interrompem a execução.
+
+A prata é reconstruível: apagar `dados/prata/` e rodar `python src/pipeline.py
+transformacao` recria tudo a partir da bronze.
+
+Os CSV do SIM e do SINASC (cerca de 550 MB cada) cabem na memória de um computador
+comum só se forem tratados com cuidado. Ler cada um de uma vez pedia mais de 3 GB livres
+e falhava com "out of memory". Por isso:
+- `limpeza.ler_csv_por_partes` lê o CSV em partes de 100 mil linhas e monta o resultado
+  coluna por coluna, com os mesmos tipos e valores de uma leitura única;
+- `limpeza.filtrar_linhas` remove linhas inválidas sem copiar o DataFrame inteiro (e não
+  faz nada quando não há o que remover);
+- em `enriquecer.juntar`, o left join com `validate="many_to_one"` roda só sobre a coluna
+  da chave, e as colunas do cadastro são acrescentadas à tabela de eventos.
+
+O resultado de todas essas mudanças foi conferido contra a versão anterior (mesmas
+colunas, tipos e valores). O pico de memória fica em torno de 2 a 3 GB por etapa.
