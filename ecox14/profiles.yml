@@ -1,0 +1,10 @@
+# Como o dbt se conecta ao banco. Fica dentro do projeto porque o DuckDB nao tem
+# usuario nem senha (nada secreto aqui). O dbt procura primeiro nesta pasta.
+# O caminho e relativo a pasta ecox14/, que e de onde o dbt roda.
+ecox14:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../dados/ouro/projeto.duckdb
+      schema: ouro

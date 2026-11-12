@@ -1,0 +1,22 @@
+# Projeto dbt: constroi a camada Ouro (dim, fato e views) dentro do banco
+# dados/ouro/projeto.duckdb, a partir das tabelas do esquema prata.
+# O nome do projeto nao pode ser "dbt" (reservado).
+name: 'ecox14'
+version: '1.0.0'
+
+# Qual perfil de conexao usar: precisa ser igual ao nome em profiles.yml.
+profile: 'ecox14'
+
+model-paths: ["models"]
+
+clean-targets: ["target", "dbt_packages"]
+
+# Nao enviar estatisticas de uso para fora.
+flags:
+  send_anonymous_usage_stats: false
+
+# Padrao: todo modelo vira TABELA. Um modelo que queira outra coisa troca
+# no proprio arquivo, com {{ config(materialized='view') }}.
+models:
+  ecox14:
+    +materialized: table

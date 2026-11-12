@@ -1,23 +1,26 @@
-"""Carga (Ouro): carrega a Prata dentro de um banco DuckDB e constroi a
-camada Ouro, em SQL, dentro do proprio banco.
+"""Carga: carrega a Prata dentro de um banco DuckDB.
+
+A camada Ouro NAO e mais construida aqui: desde a Aula 10 quem a constroi e o
+dbt (pasta ecox14/, etapa modelagem do pipeline). Este arquivo continua com
+tudo que nao e transformacao: abrir o banco, ler os Parquets e conferir.
 
 O banco inteiro e um arquivo so: dados/ouro/projeto.duckdb. Apagar o arquivo
 e uma forma legitima de recomecar do zero; rodar de novo tambem e seguro
 (CREATE OR REPLACE refaz cada tabela, sem duplicar nada).
 
 Esquemas dentro do banco:
-    prata -> os Parquets da Prata, como estao
-    ouro  -> nasce da prata, aqui dentro, escrita em SQL
+    prata -> os Parquets da Prata, como estao (criado por este arquivo)
+    ouro  -> nasce da prata, aqui dentro, construido pelo dbt
 
-Modelo da Ouro (esquema estrela):
+Modelo da Ouro (esquema estrela), definido em ecox14/models/:
     ouro.dim_municipio             1 linha = 1 municipio              (dimensao)
     ouro.fato_indicador_municipio  1 linha = 1 municipio em 1 ano     (fato)
     ouro.vw_indicador_completo     view: fato + dimensao (tabela achatada)
     ouro.vw_indicador_regiao       view: 1 linha = 1 regiao em 1 ano
 
 Como executar, a partir de qualquer pasta:
-    python src/carga.py             # so esta etapa
-    python src/pipeline.py carga    # pelo pipeline
+    python src/carga.py             # so a carga da Prata
+    python src/pipeline.py carga    # carga + modelagem (dbt) + conferencia
 """
 
 import logging
@@ -94,7 +97,9 @@ def carregar_prata(con):
 
 
 def construir_ouro(con):
-    """Passos 4 a 6: dimensao, fato e views, tudo escrito em SQL a partir da prata."""
+    """APOSENTADA na Aula 10: hoje a Ouro e construida pelo dbt (ecox14/models),
+    com o mesmo SQL, um arquivo por tabela. Fica aqui, sem ser chamada, para
+    comparar os dois jeitos e mostrar de onde os modelos do dbt vieram."""
 
     # Dimensao: o que DESCREVE o municipio (palavras pelas quais se agrupa/filtra).
     # O nome da fonte traz a UF no fim ("Ariquemes - RO"); aqui ela vira coluna propria.
@@ -245,11 +250,23 @@ def main():
     con = conectar()
     try:
         carregar_prata(con)
-        construir_ouro(con)
+        # construir_ouro(con)  <- agora e o dbt (etapa modelagem)
+        # conferir(con)        <- agora roda DEPOIS do dbt: ver conferir_ouro()
+    finally:
+        # Libera o arquivo. Tem que fechar aqui: o dbt roda logo depois, em outro
+        # programa, e dois programas abertos no mesmo arquivo dao "file is locked".
+        con.close()
+
+
+def conferir_ouro():
+    """Roda depois do dbt: so ai a Ouro existe. Se algo nao fecha, levanta erro
+    e o pipeline para. (Na proxima aula estas contas viram testes do dbt.)"""
+    con = conectar()
+    try:
         conferir(con)
         mostrar_regioes(con)
     finally:
-        con.close()  # libera o arquivo (no Windows, aberto = travado para outros programas)
+        con.close()
 
 
 if __name__ == "__main__":

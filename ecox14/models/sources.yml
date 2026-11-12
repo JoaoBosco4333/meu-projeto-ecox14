@@ -1,0 +1,13 @@
+# Origens: tabelas que o dbt NAO constroi (a carga.py cria no esquema prata).
+# Declarar nao muda o resultado hoje; serve para o dbt saber onde o grafo
+# comeca e, na proxima aula, para testar o dado de entrada antes de transformar.
+version: 2
+
+sources:
+  - name: prata
+    schema: prata
+    tables:
+      - name: populacao
+      - name: municipio_enriquecido
+      - name: sim_enriquecido
+      - name: sinasc_enriquecido

@@ -1,20 +1,25 @@
-"""Pipeline completo: ingestao -> transformacao -> enriquecimento -> carga.
+"""Pipeline completo: ingestao -> transformacao -> enriquecimento -> carga -> modelagem.
 
 Como executar, a partir de qualquer pasta:
     python src/pipeline.py                  # roda tudo
     python src/pipeline.py enriquecimento   # retoma a partir de uma etapa
-    python src/pipeline.py carga            # so a carga (e o que vier depois dela)
+    python src/pipeline.py carga            # a carga (e o que vier depois dela)
+    python src/pipeline.py modelagem        # so o dbt, que reconstroi a camada Ouro
 
-Etapas ainda nao implementadas (modelagem) aparecem na lista com None e
-sao apenas registradas no log, sem quebrar a execucao.
+A modelagem roda o dbt (projeto em ecox14/) e depois confere o resultado. Uma
+etapa que esteja com None na lista e apenas registrada no log, sem quebrar a
+execucao (serve para etapas ainda nao implementadas).
 
 Regra de importacao: o pipeline importa as etapas; nenhuma etapa importa
 o pipeline.
 """
 
 import logging
+import shutil
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import config
 import enriquecer
@@ -58,12 +63,40 @@ def etapa_carga():
     carga.main()
 
 
+def etapa_modelagem():
+    # O dbt constroi a Ouro (dim, fato e views) dentro do banco que a carga criou.
+    # Procura o dbt na mesma pasta do Python que esta rodando o pipeline; assim
+    # funciona mesmo sem ativar o ambiente virtual (se nao achar, tenta o PATH).
+    dbt = shutil.which("dbt", path=str(Path(sys.executable).parent)) or shutil.which("dbt")
+    if dbt is None:
+        raise FileNotFoundError("dbt nao encontrado. Instale com: pip install -r requirements.txt")
+    resultado = subprocess.run(
+        [dbt, "--no-use-colors", "run"],
+        cwd=config.RAIZ / "ecox14",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    # A saida do dbt entra no log do pipeline, para o erro (se houver) ficar la.
+    for linha in resultado.stdout.splitlines():
+        if linha.strip():
+            log.info("dbt: %s", linha)
+    # Se o dbt falhou, levanta erro. Sem isso o pipeline diria que terminou
+    # bem com a Ouro quebrada.
+    resultado.check_returncode()
+
+    import carga
+    carga.conferir_ouro()
+
+
 ETAPAS = [
     ("ingestao", ingerir_todas),
     ("transformacao", transformar_todas),
     ("enriquecimento", enriquecer.main),
     ("carga", etapa_carga),
-    ("modelagem", None),
+    ("modelagem", etapa_modelagem),
 ]
 
 
