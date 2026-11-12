@@ -1,13 +1,12 @@
 from datetime import datetime
 import json
-from pathlib import Path
+import logging
 import pandas as pd
 
-import limpeza  
+import limpeza
+from config import BRONZE, PRATA, SIM_PADRAO, configurar_log
 
-BRONZE = Path("dados/bronze")
-PRATA = Path("dados/prata")
-PADRAO = "SIM_*.csv"
+log = logging.getLogger("transformar_sim")
 
 # Níveis de escolaridade válidos do DataSUS (0: Nenhuma, 1: 1-3 anos, ..., 5: Superior completo)
 # O código 9 (Ignorado) é deixado de fora para ser tratado como valor nulo/ausente
@@ -16,38 +15,44 @@ ORDEM_ESCOLARIDADE = [0, 1, 2, 3, 4, 5]
 
 def carregar():
     """Busca o arquivo mais recente do SIM na camada Bronze e realiza a leitura inicial."""
-    arquivos = sorted(BRONZE.glob(PADRAO))
+    arquivos = sorted(BRONZE.glob(SIM_PADRAO))
     if not arquivos:
-        raise FileNotFoundError(f"nada em {BRONZE}")
+        raise FileNotFoundError(f"nada em {BRONZE} com o padrao {SIM_PADRAO}")
 
     # Seleciona o arquivo mais recente da lista ordenada
     caminho = arquivos[-1]
-    df = pd.read_csv(caminho, sep=";", encoding="latin-1", low_memory=False)
-    print("lido:", caminho.name, df.shape)
+    # leitura em partes: o arquivo e grande e ler de uma vez estoura a memoria
+    df = limpeza.ler_csv_por_partes(caminho, sep=";", encoding="latin-1")
+    log.info("lido: %s %s", caminho.name, df.shape)
     return df, caminho
 
 
 def conferir_chave(df, chave="contador"):
     """Verifica e remove registros totalmente duplicados com base na coluna chave primária."""
-    repetidas = df[chave].duplicated().sum()
-    print("linhas identicas (chave repetida):", repetidas)
+    repetidas = int(df[chave].duplicated().sum())
     if repetidas:
-        print(df[df[chave].duplicated(keep=False)])
-    return df.drop_duplicates(subset=chave)
+        log.warning("linhas identicas (chave '%s' repetida): %d", chave, repetidas)
+        log.debug("linhas repetidas:\n%s", df[df[chave].duplicated(keep=False)].head(20).to_string())
+    else:
+        log.info("linhas identicas (chave '%s' repetida): 0", chave)
+    return limpeza.filtrar_linhas(df, ~df[chave].duplicated())
 
 
 def remover_colunas_mortas(df, colunas=("CB_PRE",)):
     """Elimina colunas que não agregam valor analítico (ex: 100% nulas ou depreciadas)."""
     presentes = [c for c in colunas if c in df.columns]
-    print("colunas removidas (100% vazias / tipo nao suportado):", presentes)
-    return df.drop(columns=presentes)
+    log.info("colunas removidas (100%% vazias / tipo nao suportado): %s", presentes)
+    # del coluna a coluna: nao copia o DataFrame inteiro como df.drop faria
+    for coluna in presentes:
+        del df[coluna]
+    return df
 
 
 def resolver_escolaridade(df):
     """Remove o padrão antigo de escolaridade ('ESC'), mantendo apenas o padrão mais recente ('ESC2010')."""
     if "ESC" in df.columns:
-        print("ESC removida; mantida ESC2010 (padrao mais recente)")
-        df = df.drop(columns=["ESC"])
+        log.info("ESC removida; mantida ESC2010 (padrao mais recente)")
+        del df["ESC"]  # sem copiar o DataFrame inteiro, como df.drop faria
     return df
 
 
@@ -116,7 +121,7 @@ def marcar_extremos(df, coluna):
     valida = df[coluna].dropna()
     baixo, alto = limites_iqr(valida)
     df[coluna + "_extremo"] = (df[coluna] < baixo) | (df[coluna] > alto)
-    print(coluna, "extremos (IQR):", df[coluna + "_extremo"].sum())
+    log.info("%s extremos (IQR): %d", coluna, df[coluna + "_extremo"].sum())
     return df
 
 
@@ -124,15 +129,15 @@ def marcar_zscore(df, coluna, limite=3):
     """Adiciona uma flag booleana indicando se o valor afasta-se mais de `limite` desvios-padrão da média (Z-Score)."""
     z = (df[coluna] - df[coluna].mean()) / df[coluna].std()
     df[coluna + "_z"] = z.abs() > limite
-    print(coluna, "extremos (z-score):", df[coluna + "_z"].sum())
+    log.info("%s extremos (z-score): %d", coluna, df[coluna + "_z"].sum())
     return df
 
 
 def remover_erros_idade(df, minimo=0, maximo=130):
     """Filtra e remove registros com idades biologicamente impossíveis (mantendo os valores ausentes)."""
     valido = df["idade_anos"].between(minimo, maximo) | df["idade_anos"].isna()
-    print("removidas (idade fora de 0-130 anos):", (~valido).sum())
-    return df[valido].copy()
+    log.info("removidas (idade fora de %d-%d anos): %d", minimo, maximo, (~valido).sum())
+    return limpeza.filtrar_linhas(df, valido)
 
 
 def salvar(df):
@@ -140,7 +145,7 @@ def salvar(df):
     PRATA.mkdir(parents=True, exist_ok=True)
     destino = PRATA / "sim.parquet"
     df.to_parquet(destino, index=False)
-    print("salvo em:", destino, df.shape)
+    log.info("salvo em: %s %s", destino, df.shape)
     return destino
 
 
@@ -203,4 +208,5 @@ def main():
 
 
 if __name__ == "__main__":
+    configurar_log()
     main()

@@ -1,23 +1,22 @@
 """Transformacao (Prata) da terceira fonte: populacao por municipio, IBGE."""
 import json
+import logging
 from datetime import datetime
-from pathlib import Path
 import pandas as pd
 
 import limpeza
+from config import IBGE_BRONZE, IBGE_PADRAO, PRATA, configurar_log
 
-BRONZE = Path("dados/bronze/ibge/populacao_municipios")
-PRATA = Path("dados/prata")
-PADRAO = "populacao_*.csv"
+log = logging.getLogger("transformar_populacao")
 
 
 def carregar():
-    arquivos = sorted(BRONZE.glob(PADRAO))
+    arquivos = sorted(IBGE_BRONZE.glob(IBGE_PADRAO))
     if not arquivos:
-        raise FileNotFoundError(f"nada em {BRONZE}")
+        raise FileNotFoundError(f"nada em {IBGE_BRONZE} com o padrao {IBGE_PADRAO}")
     caminho = arquivos[-1]
     df = pd.read_csv(caminho)
-    print("lido:", caminho.name, df.shape)
+    log.info("lido: %s %s", caminho.name, df.shape)
     return df, caminho
 
 
@@ -43,7 +42,11 @@ def criar_regiao(df):
     }
     primeiro_digito = df["codigo_municipio"].astype(str).str[0]
     df["regiao"] = primeiro_digito.map(mapa_regiao)
-    print("municipios sem regiao mapeada:", df["regiao"].isna().sum())
+    sem_regiao = int(df["regiao"].isna().sum())
+    if sem_regiao:
+        log.warning("municipios sem regiao mapeada: %d", sem_regiao)
+    else:
+        log.info("municipios sem regiao mapeada: 0")
     return df
 
 
@@ -51,7 +54,7 @@ def salvar(df):
     PRATA.mkdir(parents=True, exist_ok=True)
     destino = PRATA / "populacao.parquet"
     df.to_parquet(destino, index=False)
-    print("salvo em:", destino, df.shape)
+    log.info("salvo em: %s %s", destino, df.shape)
     return destino
 
 
@@ -85,4 +88,5 @@ def main():
 
 
 if __name__ == "__main__":
+    configurar_log()
     main()

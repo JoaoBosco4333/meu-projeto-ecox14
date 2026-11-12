@@ -1,14 +1,12 @@
 from datetime import datetime
 import json
-from pathlib import Path
+import logging
 import pandas as pd
 
-import limpeza 
+import limpeza
+from config import BRONZE, PRATA, SINASC_PADRAO, configurar_log
 
-
-BRONZE = Path("dados/bronze")
-PRATA = Path("dados/prata")
-PADRAO = "SINASC_*.csv"
+log = logging.getLogger("transformar_sinasc")
 
 # Escolaridade da mãe: 0-5 são válidos; 9 (ignorado) fica fora de propósito
 ORDEM_ESCOLARIDADE = [0, 1, 2, 3, 4, 5]
@@ -25,22 +23,25 @@ def criar_faixa_peso(df):
 
 def carregar():
     """Carrega o arquivo mais recente do SINASC contido na camada Bronze."""
-    arquivos = sorted(BRONZE.glob(PADRAO))
+    arquivos = sorted(BRONZE.glob(SINASC_PADRAO))
     if not arquivos:
-        raise FileNotFoundError(f"nada em {BRONZE}")
+        raise FileNotFoundError(f"nada em {BRONZE} com o padrao {SINASC_PADRAO}")
     caminho = arquivos[-1]
-    df = pd.read_csv(caminho, sep=";", encoding="latin-1", low_memory=False)
-    print("lido:", caminho.name, df.shape)
+    # leitura em partes: o arquivo e grande e ler de uma vez estoura a memoria
+    df = limpeza.ler_csv_por_partes(caminho, sep=";", encoding="latin-1")
+    log.info("lido: %s %s", caminho.name, df.shape)
     return df, caminho
 
 
 def conferir_chave(df, chave="contador"):
     """Garante a unicidade dos dados removendo linhas duplicadas com base no identificador."""
-    repetidas = df[chave].duplicated().sum()
-    print("linhas identicas (chave repetida):", repetidas)
+    repetidas = int(df[chave].duplicated().sum())
     if repetidas:
-        print(df[df[chave].duplicated(keep=False)])
-    return df.drop_duplicates(subset=chave)
+        log.warning("linhas identicas (chave '%s' repetida): %d", chave, repetidas)
+        log.debug("linhas repetidas:\n%s", df[df[chave].duplicated(keep=False)].head(20).to_string())
+    else:
+        log.info("linhas identicas (chave '%s' repetida): 0", chave)
+    return limpeza.filtrar_linhas(df, ~df[chave].duplicated())
 
 
 def converter_datas(df, colunas=("DTNASC", "DTULTMENST", "DTDECLARAC")):
@@ -87,18 +88,16 @@ def remover_erros_apgar(df):
     """Remove registros com pontuações de APGAR inconsistentes (fora do intervalo válido da escala 0-10)."""
     for col in ("APGAR1", "APGAR5"):
         valido = df[col].between(0, 10) | df[col].isna()
-        print(f"{col} fora de 0-10 (erro comprovado):", (~valido).sum())
-        df = df[valido].copy()
+        log.info("%s fora de 0-10 (erro comprovado): %d", col, (~valido).sum())
+        df = limpeza.filtrar_linhas(df, valido)
     return df
 
 
 def remover_erros_peso(df, minimo=200, maximo=7000):
     """Filtra e descarta registros com pesos (em gramas) fora dos limites biológicos aceitáveis."""
     valido = df["PESO"].between(minimo, maximo) | df["PESO"].isna()
-    print(
-        f"PESO fora de {minimo}-{maximo}g (erro comprovado):", (~valido).sum()
-    )
-    return df[valido].copy()
+    log.info("PESO fora de %d-%dg (erro comprovado): %d", minimo, maximo, (~valido).sum())
+    return limpeza.filtrar_linhas(df, valido)
 
 
 def limites_iqr(serie):
@@ -113,7 +112,7 @@ def marcar_extremos(df, coluna):
     valida = df[coluna].dropna()
     baixo, alto = limites_iqr(valida)
     df[coluna + "_extremo"] = (df[coluna] < baixo) | (df[coluna] > alto)
-    print(coluna, "extremos (IQR):", df[coluna + "_extremo"].sum())
+    log.info("%s extremos (IQR): %d", coluna, df[coluna + "_extremo"].sum())
     return df
 
 
@@ -121,7 +120,7 @@ def marcar_zscore(df, coluna, limite=3):
     """Gera flag de indicação para valores de peso extremos utilizando Z-Score."""
     z = (df[coluna] - df[coluna].mean()) / df[coluna].std()
     df[coluna + "_z"] = z.abs() > limite
-    print(coluna, "extremos (z-score):", df[coluna + "_z"].sum())
+    log.info("%s extremos (z-score): %d", coluna, df[coluna + "_z"].sum())
     return df
 
 
@@ -130,8 +129,8 @@ def salvar(df):
     PRATA.mkdir(parents=True, exist_ok=True)
     destino = PRATA / "sinasc.parquet"
     df.to_parquet(destino, index=False)
-    print("salvo em:", destino, df.shape)
-    return destination if (destination := destino) else destino
+    log.info("salvo em: %s %s", destino, df.shape)
+    return destino
 
 
 def registrar(origem, destino, antes, depois, decisoes):
@@ -198,4 +197,5 @@ def main():
 
 
 if __name__ == "__main__":
+    configurar_log()
     main()
